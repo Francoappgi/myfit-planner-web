@@ -29,6 +29,41 @@ function ensureSixMeals(){
  });
  if(changed)save();
 }
+
+const FOOD_ALIASES={'uovo':'Uova','uova':'Uova','uova sode':'Uova','uovo sodo':'Uova','pollo al limone':'Pollo','pollo':'Pollo','pane':'Pane','tonno':'Tonno','pasta':'Pasta','riso':'Riso','ricotta':'Ricotta','zucchine':'Zucchine','patate':'Patate','carote':'Carote','parmigiano':'Parmigiano','frutta fresca':'Frutta fresca','mandorle':'Mandorle'};
+function normalizeFood(s){let v=s.trim().toLowerCase().replace(/^(?:\d+\s+)?/,'').replace(/\s+sod[oe]$/,'');return FOOD_ALIASES[v]||v.charAt(0).toUpperCase()+v.slice(1)}
+function parseFood(food){
+ return food.split(/[,;]/).map(s=>s.trim()).filter(Boolean).map(s=>{
+  let m=s.match(/^(\d+(?:[.,]\d+)?)\s+(.+?)$/);
+  if(m && /^(?:uov[ao]|uova sode)$/i.test(m[2]))return {name:'Uova',amount:Number(m[1].replace(',','.')),unit:'pz'};
+  m=s.match(/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l|pz)\b/i);
+  if(m){let unit=m[3].toLowerCase(),amount=Number(m[2].replace(',','.'));if(unit==='kg'){amount*=1000;unit='g'}if(unit==='l'){amount*=1000;unit='ml'}return {name:normalizeFood(m[1]),amount,unit}}
+  return {name:normalizeFood(s),amount:0,unit:'da definire'};
+ });
+}
+function shoppingPlan(){
+ const n=Math.min(30,Math.max(1,Number(data.settings.shoppingDays)||7));
+ const today=new Date();today.setHours(12,0,0,0);
+ const totals=new Map(),dates=[];
+ for(let offset=0;offset<n;offset++){
+  const d=new Date(today);d.setDate(today.getDate()+offset);
+  dates.push(d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'}));
+  const weekday=(d.getDay()+6)%7;
+  for(const meal of (data.meals[weekday]||[])){
+   for(const item of parseFood(meal.food||'')){
+    const key=item.name.toLowerCase()+'|'+item.unit;
+    if(!totals.has(key))totals.set(key,{...item,key});
+    else totals.get(key).amount+=item.amount;
+   }
+  }
+ }
+ for(const item of (data.settings.extraShopping||[])){
+  const key=item.name.toLowerCase()+'|'+item.unit;
+  if(!totals.has(key))totals.set(key,{...item,key});
+  else totals.get(key).amount+=item.amount;
+ }
+ return {items:[...totals.values()].sort((a,b)=>a.name.localeCompare(b.name,'it')),dates,n};
+}
 const WORK=[['Lunedì','Forza A · multistazione · 20–30 min'],['Martedì','Tapis roulant · 15–20 min'],['Mercoledì','Recupero · passeggiata facoltativa'],['Giovedì','Forza B · multistazione · 20–30 min'],['Venerdì','Passeggiata facoltativa'],['Sabato','Passeggiata facoltativa'],['Domenica','Passeggiata facoltativa']];
 const INIT={meals:BASE.map(x=>x.map(([name,food])=>({name,food,done:false}))),shopping:[{name:'Uova',amount:8,unit:'pz',double:true},{name:'Zucchine',amount:1000,unit:'g',double:true},{name:'Tonno',amount:4,unit:'scatolette',double:true},{name:'Mandorle',amount:100,unit:'g',double:false},{name:'Pane',amount:600,unit:'g',double:true}],measurements:[],symptoms:[],workouts:{},settings:{goal:null},checks:{}};
 let data;try{data=JSON.parse(localStorage.getItem('myfit-v1'))||structuredClone(INIT)}catch{data=structuredClone(INIT)}
@@ -39,7 +74,7 @@ const app=document.getElementById('app'),nav=document.getElementById('nav');
 function show(){nav.innerHTML=['Oggi','Dieta','Allenamento','Spesa','Progressi','Diario','Impostazioni'].map(t=>'<button class="'+(t===tab?'on':'')+'" data-tab="'+t+'">'+t+'</button>').join('');nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;show()});let html='';
 if(tab==='Oggi'||tab==='Dieta'){html='<div class="card"><h2>Menu settimanale</h2><label>Giorno <select id="day">'+DAYS.map((d,i)=>'<option value="'+i+'" '+(i===day?'selected':'')+'>'+d+'</option>').join('')+'</select></label><p class="muted">Menu indicativo: calorie e proteine ancora da verificare. Colazione prevalentemente salata, senza yogurt.</p></div>';html+=data.meals[day].map((m,i)=>'<div class="card"><h3>'+esc(m.name)+'</h3><label><input type="checkbox" data-meal="'+i+'" '+(m.done?'checked':'')+'> Consumato</label><textarea data-food="'+i+'">'+esc(m.food)+'</textarea></div>').join('');html+='<div class="card"><small>Spuntini indicativi da personalizzare. Le quantità e la compatibilità con il piano alimentare devono essere verificate.</small></div>'}
 if(tab==='Allenamento'){html='<div class="card"><h2>Allenamenti lun–gio</h2><p class="muted">Nel weekend solo passeggiate facoltative. Intensità da adattare alla pressione e alla condizione fisica.</p>'+WORK.map(([d,w],i)=>'<div class="row"><span><b>'+d+'</b><br><small>'+w+'</small></span><label><input type="checkbox" data-work="'+i+'" '+(data.workouts[i]?'checked':'')+'> Fatto</label></div>').join('')+'</div>'}
-if(tab==='Spesa'){html='<div class="card"><h2>Lista della spesa</h2><p class="muted">Quantità iniziali indicative: modificabili. ×2 è indipendente per ogni prodotto.</p>'+data.shopping.map((x,i)=>'<div class="row"><label><input type="checkbox" data-check="'+i+'" '+(data.checks[i]?'checked':'')+'> '+esc(x.name)+'</label><span>'+esc(x.amount*(x.double?2:1))+' '+esc(x.unit)+'</span><label><input type="checkbox" data-double="'+i+'" '+(x.double?'checked':'')+'> ×2</label></div>').join('')+'<button class="primary" id="add">Aggiungi articolo</button> <button id="copy">Copia lista</button></div>'}
+if(tab==='Spesa'){const plan=shoppingPlan();html='<div class="card"><h2>Spesa per i prossimi giorni</h2><label>Numero di giorni <select id="shoppingDays">'+Array.from({length:30},(_,i)=>'<option value="'+(i+1)+'" '+(plan.n===i+1?'selected':'')+'>'+(i+1)+'</option>').join('')+'</select></label><p class="muted">Da oggi '+esc(plan.dates[0])+' fino al '+esc(plan.dates.at(-1))+' · '+plan.n+' giorni, inclusi. Quantità calcolate dai sei pasti giornalieri. Per gli ingredienti senza peso indicato compare «da definire».</p>'+plan.items.map(x=>{const doubled=!!data.settings.shoppingDouble?.[x.key];const checked=!!data.settings.shoppingChecked?.[x.key];return '<div class="row"><label><input type="checkbox" data-check-key="'+esc(x.key)+'" '+(checked?'checked':'')+'> '+esc(x.name)+'</label><span>'+(x.unit==='da definire'?'Quantità da definire':esc(x.amount*(doubled?2:1))+' '+esc(x.unit))+'</span><label><input type="checkbox" data-double-key="'+esc(x.key)+'" '+(doubled?'checked':'')+'> ×2</label></div>'}).join('')+'<button class="primary" id="add">Aggiungi articolo</button> <button id="copy">Copia lista</button></div>'}
 if(tab==='Progressi'){html='<div class="card"><h2>Misurazioni</h2><p>Obiettivo impostato: '+esc(data.settings.goal??'da impostare')+' kg</p><form id="measure"><label>Data <input name="date" type="date" required value="'+new Date().toISOString().slice(0,10)+'"></label><label>Peso (kg) <input name="weight" type="number" step=".1" min="20" max="350"></label><label>Girovita (cm) <input name="waist" type="number" step=".1" min="30" max="250"></label><label>Pressione sistolica <input name="sys" type="number" min="50" max="260"></label><label>Pressione diastolica <input name="dia" type="number" min="30" max="180"></label><p><button class="primary">Salva misura</button></p></form></div><div class="card"><h3>Storico</h3>'+data.measurements.slice().reverse().map(x=>'<div class="row">'+esc(x.date)+' · '+esc(x.weight||'—')+' kg · vita '+esc(x.waist||'—')+' cm · PA '+esc(x.sys||'—')+'/'+esc(x.dia||'—')+'</div>').join('')+'</div>'}
 if(tab==='Diario'){html='<div class="card"><h2>Gonfiore e fame</h2><form id="symptom"><label>Data <input name="date" type="date" required value="'+new Date().toISOString().slice(0,10)+'"></label><label>Gonfiore mattina (0–10) <input name="morning" type="number" min="0" max="10"></label><label>Gonfiore sera (0–10) <input name="evening" type="number" min="0" max="10"></label><label>Fame alle 18:30 (0–10) <input name="hunger" type="number" min="0" max="10"></label><label>Note <textarea name="notes"></textarea></label><button class="primary">Salva diario</button></form></div><div class="card">'+data.symptoms.slice().reverse().map(x=>'<p>'+esc(x.date)+' · '+esc(x.morning)+'/'+esc(x.evening)+' · '+esc(x.notes)+'</p>').join('')+'</div>'}
 if(tab==='Impostazioni'){html='<div class="card"><h2>Backup locale</h2><p>I dati restano sul dispositivo. Salva una copia JSON prima di cancellare i dati del browser.</p><button class="primary" id="export">Esporta backup JSON</button><label>Ripristina backup <input type="file" id="import" accept=".json,application/json"></label><label>Peso obiettivo (kg) <input type="number" step=".1" id="goal" value="'+esc(data.settings.goal??'')+'"></label></div>'}
@@ -48,10 +83,11 @@ const $=s=>app.querySelector(s);if($('#day'))$('#day').onchange=e=>{day=+e.targe
 app.querySelectorAll('[data-meal]').forEach(x=>x.onchange=e=>{data.meals[day][+x.dataset.meal].done=e.target.checked;save()});
 app.querySelectorAll('[data-food]').forEach(x=>x.onchange=e=>{data.meals[day][+x.dataset.food].food=e.target.value;save()});
 app.querySelectorAll('[data-work]').forEach(x=>x.onchange=e=>{data.workouts[x.dataset.work]=e.target.checked;save()});
-app.querySelectorAll('[data-double]').forEach(x=>x.onchange=e=>{data.shopping[+x.dataset.double].double=e.target.checked;save();show()});
-app.querySelectorAll('[data-check]').forEach(x=>x.onchange=e=>{data.checks[x.dataset.check]=e.target.checked;save()});
-if($('#add'))$('#add').onclick=()=>{let name=prompt('Nome articolo');if(!name)return;let amount=Number(prompt('Quantità',1));let unit=prompt('Unità (g, pz, kg...)','pz')||'pz';if(!Number.isFinite(amount)||amount<=0)return;data.shopping.push({name,amount,unit,double:false});save();show()};
-if($('#copy'))$('#copy').onclick=()=>navigator.clipboard.writeText(data.shopping.map((x,i)=>(data.checks[i]?'☑ ':'☐ ')+x.name+': '+x.amount*(x.double?2:1)+' '+x.unit).join('\n')).then(()=>alert('Lista copiata')).catch(()=>alert('Copia non disponibile'));
+if($('#shoppingDays'))$('#shoppingDays').onchange=e=>{data.settings.shoppingDays=+e.target.value;save();show()};
+app.querySelectorAll('[data-double-key]').forEach(x=>x.onchange=e=>{data.settings.shoppingDouble??={};data.settings.shoppingDouble[x.dataset.doubleKey]=e.target.checked;save();show()});
+app.querySelectorAll('[data-check-key]').forEach(x=>x.onchange=e=>{data.settings.shoppingChecked??={};data.settings.shoppingChecked[x.dataset.checkKey]=e.target.checked;save()});
+if($('#add'))$('#add').onclick=()=>{let name=prompt('Nome articolo');if(!name?.trim())return;let amount=Number(prompt('Quantità',1));let unit=prompt('Unità (g, pz, kg...)','pz')||'pz';if(!Number.isFinite(amount)||amount<=0)return;data.settings.extraShopping??=[];data.settings.extraShopping.push({name:name.trim(),amount,unit});save();show()};
+if($('#copy'))$('#copy').onclick=()=>{const items=shoppingPlan().items;const list=items.map(x=>(data.settings.shoppingChecked?.[x.key]?'☑ ':'☐ ')+x.name+': '+(x.unit==='da definire'?'quantità da definire':x.amount*(data.settings.shoppingDouble?.[x.key]?2:1)+' '+x.unit)).join('\\n');navigator.clipboard.writeText(list).then(()=>alert('Lista copiata')).catch(()=>alert('Copia non disponibile'))};
 if($('#measure'))$('#measure').onsubmit=e=>{e.preventDefault();data.measurements.push(Object.fromEntries(new FormData(e.target)));save();show()};
 if($('#symptom'))$('#symptom').onsubmit=e=>{e.preventDefault();data.symptoms.push(Object.fromEntries(new FormData(e.target)));save();show()};
 if($('#goal'))$('#goal').onchange=e=>{data.settings.goal=e.target.value?+e.target.value:null;save()};
