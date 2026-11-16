@@ -64,6 +64,18 @@ function shoppingPlan(){
  }
  return {items:[...totals.values()].sort((a,b)=>a.name.localeCompare(b.name,'it')),dates,n};
 }
+function breadChoice(food){if(/\bpane\s*\d+(?:[.,]\d+)?\s*g\b/i.test(food))return 'pane';if(/\b\d+\s*wasa(?:\s+original)?\b/i.test(food))return 'wasa';return ''}
+function switchBread(meal,target){
+ const food=meal.food||'',current=breadChoice(food);if(!current||current===target)return false;
+ if(target==='wasa'){
+  const m=food.match(/\bpane\s*(\d+(?:[.,]\d+)?)\s*g\b/i);if(!m)return false;
+  const grams=Number(m[1].replace(',','.'));const slices=Math.max(1,Math.round(grams/12.5));
+  meal.breadGrams=grams;meal.food=food.replace(m[0],slices+' Wasa Original');return true;
+ }
+ const m=food.match(/\b(\d+)\s*wasa(?:\s+original)?\b/i);if(!m)return false;
+ const grams=Number.isFinite(meal.breadGrams)?meal.breadGrams:Math.round(Number(m[1])*12.5/10)*10;
+ meal.food=food.replace(m[0],'pane '+grams+' g');return true;
+}
 const WORK=[['Lunedì','Forza A · multistazione · 20–30 min'],['Martedì','Tapis roulant · 15–20 min'],['Mercoledì','Recupero · passeggiata facoltativa'],['Giovedì','Forza B · multistazione · 20–30 min'],['Venerdì','Passeggiata facoltativa'],['Sabato','Passeggiata facoltativa'],['Domenica','Passeggiata facoltativa']];
 const INIT={meals:BASE.map(x=>x.map(([name,food])=>({name,food,done:false}))),shopping:[{name:'Uova',amount:8,unit:'pz',double:true},{name:'Zucchine',amount:1000,unit:'g',double:true},{name:'Tonno',amount:4,unit:'scatolette',double:true},{name:'Mandorle',amount:100,unit:'g',double:false},{name:'Pane',amount:600,unit:'g',double:true}],measurements:[],symptoms:[],workouts:{},settings:{goal:null},checks:{}};
 let data;try{data=JSON.parse(localStorage.getItem('myfit-v1'))||structuredClone(INIT)}catch{data=structuredClone(INIT)}
@@ -72,7 +84,7 @@ const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const save=()=>localStorage.setItem('myfit-v1',JSON.stringify(data));
 const app=document.getElementById('app'),nav=document.getElementById('nav');
 function show(){nav.innerHTML=['Oggi','Dieta','Allenamento','Spesa','Da comprare','Progressi','Diario','Impostazioni'].map(t=>'<button class="'+(t===tab?'on':'')+'" data-tab="'+t+'">'+t+'</button>').join('');nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;show()});let html='';
-if(tab==='Oggi'||tab==='Dieta'){html='<div class="card"><h2>Menu settimanale</h2><label>Giorno <select id="day">'+DAYS.map((d,i)=>'<option value="'+i+'" '+(i===day?'selected':'')+'>'+d+'</option>').join('')+'</select></label><label>Scambia con <select id="swapDay"><option value="">Scegli un giorno</option>'+DAYS.map((d,i)=>i===day?'':'<option value="'+i+'">'+d+'</option>').join('')+'</select></label><button id="swapMeals">Scambia i menu</button><p class="muted">Menu indicativo: calorie e proteine ancora da verificare. Colazione prevalentemente salata, senza yogurt.</p></div>';html+=data.meals[day].map((m,i)=>'<div class="card"><h3>'+esc(m.name)+'</h3><label><input type="checkbox" data-meal="'+i+'" '+(m.done?'checked':'')+'> Consumato</label><textarea data-food="'+i+'">'+esc(m.food)+'</textarea></div>').join('');html+='<div class="card"><small>Spuntini indicativi da personalizzare. Le quantità e la compatibilità con il piano alimentare devono essere verificate.</small></div>'}
+if(tab==='Oggi'||tab==='Dieta'){html='<div class="card"><h2>Menu settimanale</h2><label>Giorno <select id="day">'+DAYS.map((d,i)=>'<option value="'+i+'" '+(i===day?'selected':'')+'>'+d+'</option>').join('')+'</select></label><label>Scambia con <select id="swapDay"><option value="">Scegli un giorno</option>'+DAYS.map((d,i)=>i===day?'':'<option value="'+i+'">'+d+'</option>').join('')+'</select></label><button id="swapMeals">Scambia i menu</button><p class="muted">Menu indicativo: calorie e proteine ancora da verificare. Colazione prevalentemente salata, senza yogurt.</p></div>';html+=data.meals[day].map((m,i)=>'<div class="card"><h3>'+esc(m.name)+'</h3><label><input type="checkbox" data-meal="'+i+'" '+(m.done?'checked':'')+'> Consumato</label><textarea data-food="'+i+'">'+esc(m.food)+'</textarea>'+(breadChoice(m.food)?'<label>Alternativa al pane <select data-bread="'+i+'"><option value="pane" '+(breadChoice(m.food)==='pane'?'selected':'')+'>Pane</option><option value="wasa" '+(breadChoice(m.food)==='wasa'?'selected':'')+'>Wasa Original</option></select></label>':'')+'</div>').join('');html+='<div class="card"><small>Spuntini indicativi da personalizzare. Le quantità e la compatibilità con il piano alimentare devono essere verificate.</small></div>'}
 if(tab==='Allenamento'){html='<div class="card"><h2>Allenamenti lun–gio</h2><p class="muted">Nel weekend solo passeggiate facoltative. Intensità da adattare alla pressione e alla condizione fisica.</p>'+WORK.map(([d,w],i)=>'<div class="row"><span><b>'+d+'</b><br><small>'+w+'</small></span><label><input type="checkbox" data-work="'+i+'" '+(data.workouts[i]?'checked':'')+'> Fatto</label></div>').join('')+'</div>'}
 if(tab==='Spesa'){
  const plan=shoppingPlan();const cart=data.settings.buyList||[];
@@ -92,6 +104,8 @@ if($('#swapMeals'))$('#swapMeals').onclick=()=>{const v=$('#swapDay').value;if(v
 
 app.querySelectorAll('[data-meal]').forEach(x=>x.onchange=e=>{data.meals[day][+x.dataset.meal].done=e.target.checked;save()});
 app.querySelectorAll('[data-food]').forEach(x=>x.onchange=e=>{data.meals[day][+x.dataset.food].food=e.target.value;save()});
+app.querySelectorAll('[data-bread]').forEach(x=>x.onchange=e=>{const meal=data.meals[day][+x.dataset.bread];if(switchBread(meal,e.target.value)){save();show()}});
+
 app.querySelectorAll('[data-work]').forEach(x=>x.onchange=e=>{data.workouts[x.dataset.work]=e.target.checked;save()});
 if($('#shoppingDays'))$('#shoppingDays').onchange=e=>{data.settings.shoppingDays=+e.target.value;save();show()};
 app.querySelectorAll('[data-pick]').forEach(x=>x.onchange=e=>{
